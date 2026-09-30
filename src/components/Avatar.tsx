@@ -1,166 +1,168 @@
-import React, { useEffect, useState } from 'react';
-interface AvatarProps {
-  emotion: 'neutral' | 'happy' | 'sad' | 'angry';
-  isActive: boolean;
-  language: string;
+﻿import { useEffect, useRef } from "react";
+import * as THREE from "three";
+import { createNeutralAvatar, disposeAvatar } from "../signing/neutralAvatar";
+import { loadGLTF, loadMotion, SequencePlayer } from "../signing/motion";
+import type { Catalog, Plan } from "../signing/pipeline";
+export interface Frame {
+  index: number;
+  local: number;
+  inTransition: boolean;
+  time: number;
+  duration: number;
+  ended: boolean;
 }
-export function Avatar({ emotion, isActive, language }: AvatarProps) {
-  const [animationFrame, setAnimationFrame] = useState(0);
-  const [leftHandAngle, setLeftHandAngle] = useState(0);
-  const [rightHandAngle, setRightHandAngle] = useState(0);
-  const [leftHandY, setLeftHandY] = useState(0);
-  const [rightHandY, setRightHandY] = useState(0);
+interface Props {
+  catalog: Catalog | null;
+  plan: Plan | null;
+  playing: boolean;
+  speed: number;
+  replay: number;
+  onLoading: () => void;
+  onReady: () => void;
+  onError: (error: string) => void;
+  onFrame: (frame: Frame) => void;
+}
+export function Avatar(props: Props) {
+  const host = useRef<HTMLDivElement>(null);
+  const latest = useRef(props);
+  latest.current = props;
   useEffect(() => {
-    if (!isActive) {
-      setLeftHandAngle(0);
-      setRightHandAngle(0);
-      setLeftHandY(0);
-      setRightHandY(0);
+    const container = host.current;
+    if (!container) return;
+    latest.current.onLoading();
+    const abort = new AbortController();
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    } catch {
+      latest.current.onError(
+        "3D rendering is unavailable. Enable WebGL or try another browser.",
+      );
       return;
     }
-    const interval = setInterval(() => {
-      setAnimationFrame((prev) => (prev + 1) % 8);
-      // Create realistic signing motions
-      const frame = animationFrame;
-      // Left hand movements
-      setLeftHandAngle(Math.sin(frame * 0.5) * 45);
-      setLeftHandY(Math.sin(frame * 0.7) * 20);
-      // Right hand movements (slightly offset for natural motion)
-      setRightHandAngle(Math.sin((frame + 2) * 0.5) * -45);
-      setRightHandY(Math.sin((frame + 2) * 0.7) * 20);
-    }, 400);
-    return () => clearInterval(interval);
-  }, [isActive, animationFrame]);
-  const getEmotionGradient = () => {
-    switch (emotion) {
-      case 'happy':
-        return 'from-green-400 via-emerald-500 to-green-600';
-      case 'sad':
-        return 'from-blue-400 via-blue-500 to-blue-600';
-      case 'angry':
-        return 'from-red-400 via-red-500 to-red-600';
-      default:
-        return 'from-purple-400 via-pink-500 to-purple-600';
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    container.appendChild(renderer.domElement);
+    renderer.domElement.setAttribute(
+      "aria-label",
+      "Upper-body 3D avatar. A neutral pose is not a sign.",
+    );
+    renderer.domElement.setAttribute("role", "img");
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(32, 1, 0.01, 100);
+    scene.add(new THREE.HemisphereLight("#e4e5ff", "#413054", 2.3));
+    const key = new THREE.DirectionalLight("#fff0e6", 3);
+    key.position.set(-2, 3, 4);
+    scene.add(key);
+    const rim = new THREE.DirectionalLight("#8a76ff", 3);
+    rim.position.set(2, 2, -2);
+    scene.add(rim);
+    let root: THREE.Object3D | null = null,
+      player: SequencePlayer | null = null;
+    let frameId = 0,
+      previous = performance.now(),
+      lastEmit = 0,
+      lastReplay = latest.current.replay;
+    let bounds = new THREE.Box3();
+    const center = new THREE.Vector3(),
+      size = new THREE.Vector3(1.2, 1.8, 0.6);
+    function resize() {
+      if (!container) return;
+      const width = container.clientWidth,
+        height = container.clientHeight;
+      renderer.setSize(width, height);
+      camera.aspect = width / Math.max(height, 1);
+      const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
+      // Include horizontal reach beyond the neutral model bounds: hands must not be cropped.
+      const distance =
+        Math.max(
+          size.y / 2 / Math.tan(halfFov),
+          Math.max(size.x, props.plan ? size.y * 1.2 : size.x) /
+            2 /
+            (Math.tan(halfFov) * camera.aspect),
+        ) * 1.25;
+      camera.position.set(center.x, center.y, center.z + distance + size.z / 2);
+      camera.lookAt(center);
+      camera.updateProjectionMatrix();
     }
-  };
-  const getFacialExpression = () => {
-    switch (emotion) {
-      case 'happy':
-        return '😊';
-      case 'sad':
-        return '😢';
-      case 'angry':
-        return '😠';
-      default:
-        return '😐';
+    const observer = new ResizeObserver(resize);
+    observer.observe(container);
+    function render(now: number) {
+      const delta = Math.min((now - previous) / 1000, 0.1);
+      previous = now;
+      if (player) {
+        if (lastReplay !== latest.current.replay) {
+          player.seek(0);
+          lastReplay = latest.current.replay;
+        }
+        const frame = player.seek(
+          player.time +
+            (latest.current.playing && !document.hidden
+              ? delta * latest.current.speed
+              : 0),
+        );
+        if (now - lastEmit > 65) {
+          latest.current.onFrame(frame);
+          lastEmit = now;
+        }
+      }
+      renderer.render(scene, camera);
+      frameId = requestAnimationFrame(render);
     }
-  };
-  const getGlowColor = () => {
-    switch (emotion) {
-      case 'happy':
-        return 'shadow-green-500/50';
-      case 'sad':
-        return 'shadow-blue-500/50';
-      case 'angry':
-        return 'shadow-red-500/50';
-      default:
-        return 'shadow-purple-500/50';
+    async function initialize() {
+      const model = props.catalog?.rig.url
+        ? (await loadGLTF(props.catalog.rig.url, abort.signal)).scene
+        : createNeutralAvatar();
+      if (abort.signal.aborted) {
+        disposeAvatar(model);
+        return;
+      }
+      root = model;
+      scene.add(root);
+      root.updateMatrixWorld(true);
+      bounds = new THREE.Box3().setFromObject(root);
+      bounds.getCenter(center);
+      bounds.getSize(size);
+      resize();
+      frameId = requestAnimationFrame(render);
+      if (props.plan) {
+        const clips = await Promise.all(
+          props.plan.signs.map((asset) =>
+            loadMotion(asset, model, abort.signal),
+          ),
+        );
+        if (abort.signal.aborted) return;
+        player = new SequencePlayer(model, clips, props.plan.transitionSeconds);
+      }
+      latest.current.onReady();
     }
-  };
-  return (
-    <div className="flex flex-col items-center justify-center space-y-6 py-8">
-      <div className="relative">
-        {/* Main avatar body */}
-        <div
-          className={`w-72 h-72 rounded-full bg-gradient-to-br ${getEmotionGradient()} flex items-center justify-center transition-all duration-500 shadow-2xl ${getGlowColor()} ${isActive ? 'animate-pulse scale-105' : ''}`}>
-          
-          <div className="text-9xl animate-bounce-slow">
-            {getFacialExpression()}
-          </div>
-        </div>
-
-        {/* Left hand */}
-        {isActive &&
-        <div
-          className="absolute -left-12 top-1/2 w-20 h-28 bg-gradient-to-br from-blue-300 via-blue-400 to-blue-500 rounded-2xl shadow-xl transition-all duration-400 border-2 border-blue-200"
-          style={{
-            transform: `translateY(${leftHandY - 50}%) rotate(${leftHandAngle}deg)`,
-            transformOrigin: 'right center'
-          }}>
-          
-            {/* Fingers */}
-            <div className="absolute -top-2 left-1/2 -translate-x-1/2 flex space-x-1">
-              {[...Array(5)].map((_, i) =>
-            <div
-              key={i}
-              className="w-2 h-6 bg-gradient-to-t from-blue-400 to-blue-300 rounded-full"
-              style={{
-                height: `${20 + Math.random() * 10}px`,
-                transform: `rotate(${(i - 2) * 8}deg)`
-              }} />
-
-            )}
-            </div>
-          </div>
-        }
-
-        {/* Right hand */}
-        {isActive &&
-        <div
-          className="absolute -right-12 top-1/2 w-20 h-28 bg-gradient-to-br from-blue-300 via-blue-400 to-blue-500 rounded-2xl shadow-xl transition-all duration-400 border-2 border-blue-200"
-          style={{
-            transform: `translateY(${rightHandY - 50}%) rotate(${rightHandAngle}deg)`,
-            transformOrigin: 'left center'
-          }}>
-          
-            {/* Fingers */}
-            <div className="absolute -top-2 left-1/2 -translate-x-1/2 flex space-x-1">
-              {[...Array(5)].map((_, i) =>
-            <div
-              key={i}
-              className="w-2 h-6 bg-gradient-to-t from-blue-400 to-blue-300 rounded-full"
-              style={{
-                height: `${20 + Math.random() * 10}px`,
-                transform: `rotate(${(i - 2) * 8}deg)`
-              }} />
-
-            )}
-            </div>
-          </div>
-        }
-
-        {/* Glow effect */}
-        {isActive &&
-        <div
-          className={`absolute inset-0 rounded-full bg-gradient-to-br ${getEmotionGradient()} opacity-30 blur-2xl animate-pulse`} />
-
-        }
-      </div>
-
-      <div className="text-center space-y-3">
-        <div className="flex items-center justify-center space-x-3">
-          <div
-            className={`w-3 h-3 rounded-full ${isActive ? 'bg-green-500 animate-pulse shadow-lg shadow-green-500/50' : 'bg-gray-600'} transition-all duration-300`} />
-          
-          <span className="text-lg font-semibold text-white">
-            {isActive ? 'Signing...' : 'Waiting for input'}
-          </span>
-        </div>
-
-        {isActive &&
-        <div className="bg-gradient-to-r from-purple-900/50 to-pink-900/50 rounded-xl px-6 py-3 backdrop-blur-sm border border-purple-500/30 shadow-lg">
-            <p className="text-sm text-gray-300">
-              Displaying in{' '}
-              <span className="font-bold text-purple-400">{language}</span>
-            </p>
-            <p className="text-xs text-gray-400 mt-1">
-              With{' '}
-              <span className="font-semibold text-pink-400">{emotion}</span>{' '}
-              expression
-            </p>
-          </div>
-        }
-      </div>
-    </div>);
-
+    const timeout = window.setTimeout(() => {
+      abort.abort();
+      latest.current.onError(
+        "Avatar or animation loading timed out. Check the assets and retry.",
+      );
+    }, 20000);
+    void initialize()
+      .then(() => clearTimeout(timeout))
+      .catch((error) => {
+        clearTimeout(timeout);
+        if (!abort.signal.aborted)
+          latest.current.onError(
+            error instanceof Error ? error.message : "Avatar failed to load.",
+          );
+      });
+    return () => {
+      clearTimeout(timeout);
+      abort.abort();
+      cancelAnimationFrame(frameId);
+      observer.disconnect();
+      player?.dispose();
+      if (root) disposeAvatar(root);
+      renderer.dispose();
+      renderer.forceContextLoss();
+      renderer.domElement.remove();
+    };
+  }, [props.catalog, props.plan]);
+  return <div ref={host} className="avatar-canvas" />;
 }

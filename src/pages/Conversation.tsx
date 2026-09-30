@@ -1,399 +1,317 @@
-import React, { useState, useRef } from 'react';
+﻿import { useEffect, useState } from "react";
 import {
-  MicIcon,
-  StopCircleIcon,
-  VideoIcon,
-  PlayIcon,
-  ArrowRightIcon,
-  ArrowLeftIcon } from
-'lucide-react';
-import Webcam from 'react-webcam';
-import { Avatar } from '../components/Avatar';
+  ArrowLeft,
+  ArrowRight,
+  Mic,
+  StopCircle,
+  Video,
+  Info,
+} from "lucide-react";
+import { Playback } from "../components/Playback";
+import {
+  loadCatalog,
+  resolveInput,
+  type Catalog,
+  type Plan,
+} from "../signing/pipeline";
+import { useSpeechInput } from "../hooks/useSpeechInput";
+import { SignToSpeech } from "./SignToSpeech";
 export function Conversation() {
-  const [mode, setMode] = useState<'speech-to-sign' | 'sign-to-speech'>(
-    'speech-to-sign'
-  );
-  const [isRecording, setIsRecording] = useState(false);
-  const [isCapturing, setIsCapturing] = useState(false);
-  const [transcript, setTranscript] = useState('');
-  const [detectedText, setDetectedText] = useState('');
-  const [emotion, setEmotion] = useState<'neutral' | 'happy' | 'sad' | 'angry'>(
-    'neutral'
-  );
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [selectedLanguage, setSelectedLanguage] = useState('ASL');
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const webcamRef = useRef<Webcam>(null);
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true
-      });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      const audioChunks: Blob[] = [];
-      mediaRecorder.ondataavailable = (event) => {
-        audioChunks.push(event.data);
-      };
-      mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunks, {
-          type: 'audio/wav'
-        });
-        processAudio(audioBlob);
-        stream.getTracks().forEach((track) => track.stop());
-      };
-      mediaRecorder.start();
-      setIsRecording(true);
-    } catch (error) {
-      console.error('Error accessing microphone:', error);
-      alert('Please allow microphone access to use this feature');
+  const [text, setText] = useState(""),
+    [plan, setPlan] = useState<Plan | null>(null),
+    [catalog, setCatalog] = useState<Catalog | null>(null);
+  const [error, setError] = useState(""),
+    [catalogError, setCatalogError] = useState(""),
+    [unsupported, setUnsupported] = useState<string[]>([]);
+  const [revision, setRevision] = useState(0),
+    [attempt, setAttempt] = useState(0),
+    [mode, setMode] = useState<Plan["mode"]>("phrases");
+  const [tab, setTab] = useState<"sign" | "camera">("sign");
+  useEffect(() => {
+    const controller = new AbortController();
+    setCatalogError("");
+    setCatalog(null);
+    const timeout = setTimeout(() => {
+      controller.abort();
+      setCatalogError("Signing catalog loading timed out. Retry to reconnect.");
+    }, 15000);
+    void loadCatalog(controller.signal)
+      .then(setCatalog)
+      .catch((e) => {
+        if (!controller.signal.aborted)
+          setCatalogError(
+            e instanceof Error ? e.message : "Catalog failed to load.",
+          );
+      })
+      .finally(() => clearTimeout(timeout));
+    return () => {
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [attempt]);
+  function clearPlan(force = false) {
+    if (plan || force) setRevision((v) => v + 1);
+    setPlan(null);
+    setError("");
+    setUnsupported([]);
+  }
+  function submit(input: string) {
+    setText(input);
+    clearPlan(true);
+    if (!catalog) {
+      setError(
+        "Signing catalog is not ready. Retry loading it before preparing input.",
+      );
+      return;
     }
-  };
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
+    const result = resolveInput(input, catalog, mode);
+    if (result.ok) setPlan(result.plan);
+    else {
+      setError(result.error);
+      setUnsupported(result.unsupported);
     }
-  };
-  const processAudio = (audioBlob: Blob) => {
-    setIsProcessing(true);
-    setTimeout(() => {
-      const demoTranscripts = [
-      {
-        text: 'Hello, how are you today?',
-        emotion: 'happy' as const
-      },
-      {
-        text: 'I need help with my account',
-        emotion: 'neutral' as const
-      },
-      {
-        text: 'This is very frustrating',
-        emotion: 'angry' as const
-      },
-      {
-        text: 'Thank you so much for your help',
-        emotion: 'happy' as const
-      }];
-
-      const demo =
-      demoTranscripts[Math.floor(Math.random() * demoTranscripts.length)];
-      setTranscript(demo.text);
-      setEmotion(demo.emotion);
-      setIsProcessing(false);
-    }, 1500);
-  };
-  const startCapture = () => {
-    setIsCapturing(true);
-    setIsProcessing(true);
-    setTimeout(() => {
-      const demoSigns = [
-      {
-        text: 'Hello, nice to meet you',
-        emotion: 'happy' as const
-      },
-      {
-        text: 'Can you help me please?',
-        emotion: 'neutral' as const
-      },
-      {
-        text: 'I am not happy with this',
-        emotion: 'angry' as const
-      },
-      {
-        text: 'Thank you very much',
-        emotion: 'happy' as const
-      }];
-
-      const demo = demoSigns[Math.floor(Math.random() * demoSigns.length)];
-      setDetectedText(demo.text);
-      setEmotion(demo.emotion);
-      setIsProcessing(false);
-      speakText(demo.text, demo.emotion);
-    }, 2000);
-  };
-  const stopCapture = () => {
-    setIsCapturing(false);
-    setIsProcessing(false);
-  };
-  const speakText = (text: string, emotion: string) => {
-    if ('speechSynthesis' in window) {
-      const utterance = new SpeechSynthesisUtterance(text);
-      switch (emotion) {
-        case 'happy':
-          utterance.pitch = 1.2;
-          utterance.rate = 1.1;
-          break;
-        case 'sad':
-          utterance.pitch = 0.8;
-          utterance.rate = 0.9;
-          break;
-        case 'angry':
-          utterance.pitch = 0.9;
-          utterance.rate = 1.2;
-          utterance.volume = 0.9;
-          break;
-        default:
-          utterance.pitch = 1;
-          utterance.rate = 1;
-      }
-      window.speechSynthesis.speak(utterance);
-    }
-  };
+  }
+  const speech = useSpeechInput(submit);
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-      <div className="text-center mb-8">
-        <h1 className="text-5xl font-bold mb-3 bg-gradient-to-r from-purple-400 via-pink-400 to-blue-400 bg-clip-text text-transparent">
-          Start a Conversation
-        </h1>
-        <p className="text-gray-300 text-lg">
-          Choose your communication mode and start translating
+    <main id="main" className="workspace">
+      <div className="conversation-title">
+        <h1>Start a Conversation</h1>
+        <p>
+          Speak or type your message. Play it back through a signing avatar.
         </p>
       </div>
-
-      <div className="flex justify-center mb-8">
-        <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl p-2 border border-gray-700 inline-flex space-x-2">
+      <div className="workspace-toolbar">
+        <div className="mode-tabs">
           <button
-            onClick={() => setMode('speech-to-sign')}
-            className={`px-6 py-3 rounded-lg font-semibold transition-all duration-300 flex items-center space-x-2 ${mode === 'speech-to-sign' ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg shadow-purple-500/50' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}>
-            
-            <MicIcon className="w-5 h-5" />
-            <span>Speech to Sign</span>
-            <ArrowRightIcon className="w-4 h-4" />
+            aria-pressed={tab === "sign"}
+            disabled={speech.listening}
+            onClick={() => setTab("sign")}
+          >
+            <Mic size={18} />
+            Speech to Sign <ArrowRight size={16} />
           </button>
           <button
-            onClick={() => setMode('sign-to-speech')}
-            className={`px-6 py-3 rounded-lg font-semibold transition-all duration-300 flex items-center space-x-2 ${mode === 'sign-to-speech' ? 'bg-gradient-to-r from-blue-600 to-cyan-600 text-white shadow-lg shadow-blue-500/50' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}>
-            
-            <ArrowLeftIcon className="w-4 h-4" />
-            <span>Sign to Speech</span>
-            <VideoIcon className="w-5 h-5" />
+            aria-pressed={tab === "camera"}
+            disabled={speech.listening}
+            onClick={() => {
+              clearPlan();
+              setTab("camera");
+            }}
+          >
+            <ArrowLeft size={16} />
+            Sign to Speech <Video size={18} />
+            <span className="tiny-tag">Preview</span>
           </button>
         </div>
       </div>
-
-      {mode === 'speech-to-sign' ?
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl shadow-2xl p-8 border border-gray-700 hover:border-purple-500/50 transition-all duration-300">
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-300 mb-2">
+      {tab === "sign" ? (
+        <>
+          <div className="workspace-grid">
+            <section className="panel composer">
+              <label className="field-label" htmlFor="sign-language">
                 Select Sign Language
               </label>
               <select
-              value={selectedLanguage}
-              onChange={(e) => setSelectedLanguage(e.target.value)}
-              className="w-full px-4 py-3 bg-gray-900 border border-gray-700 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-white transition-all duration-300">
-              
-                <option value="ASL">American Sign Language (ASL)</option>
-                <option value="ISL">Indian Sign Language (ISL)</option>
-                <option value="BSL">British Sign Language (BSL)</option>
-                <option value="AUSLAN">
-                  Australian Sign Language (AUSLAN)
+                id="sign-language"
+                disabled
+                value={catalog?.language || ""}
+              >
+                <option value={catalog?.language || ""}>
+                  {catalog?.language || "Awaiting target-language confirmation"}
                 </option>
-                <option value="ESL">Emirati Sign Language (ESL)</option>
               </select>
-            </div>
-
-            <div className="flex flex-col items-center space-y-6">
-              <button
-              onClick={isRecording ? stopRecording : startRecording}
-              disabled={isProcessing}
-              className={`w-36 h-36 rounded-full flex items-center justify-center transition-all duration-300 ${isRecording ? 'bg-gradient-to-br from-red-500 to-red-700 animate-pulse shadow-2xl shadow-red-500/50' : 'bg-gradient-to-br from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 shadow-xl shadow-purple-500/50 hover:shadow-2xl hover:shadow-purple-500/70 hover:scale-110'} ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}>
-              
-                {isRecording ?
-              <StopCircleIcon className="w-20 h-20 text-white" /> :
-
-              <MicIcon className="w-20 h-20 text-white" />
-              }
-              </button>
-
-              <div className="text-center">
-                <p className="text-xl font-semibold text-white">
-                  {isRecording ?
-                'Recording...' :
-                isProcessing ?
-                'Processing...' :
-                'Tap to Start Speaking'}
-                </p>
-                <p className="text-sm text-gray-400 mt-2">
-                  {isRecording ?
-                'Tap again to stop' :
-                'Your speech will be converted to sign language'}
-                </p>
-              </div>
-
-              {transcript &&
-            <div className="w-full bg-gray-900/50 rounded-lg p-6 border border-purple-500/30 backdrop-blur-sm">
-                  <p className="text-sm font-medium text-gray-400 mb-2">
-                    Transcript:
+              <div className="microphone-section">
+                <button
+                  className={`microphone-button ${speech.listening ? "recording" : ""}`}
+                  disabled={!catalog || Boolean(catalogError)}
+                  onClick={() => {
+                    if (speech.listening) speech.stop();
+                    else {
+                      clearPlan();
+                      speech.start();
+                    }
+                  }}
+                  aria-label={
+                    speech.listening ? "Stop listening" : "Start microphone"
+                  }
+                >
+                  {speech.listening ? (
+                    <StopCircle size={35} />
+                  ) : (
+                    <Mic size={35} />
+                  )}
+                </button>
+                <div>
+                  <h3>
+                    {speech.listening ? "Listening…" : "Tap to Start Speaking"}
+                  </h3>
+                  <p>
+                    {speech.listening
+                      ? "Press stop when you are finished."
+                      : "Or type below — both use the same signing pipeline."}
                   </p>
-                  <p className="text-lg text-white mb-4">{transcript}</p>
-                  <div className="flex items-center space-x-2">
-                    <span className="text-sm font-medium text-gray-400">
-                      Detected Emotion:
-                    </span>
-                    <span
-                  className={`px-3 py-1 rounded-full text-sm font-medium ${emotion === 'happy' ? 'bg-green-500/20 text-green-400 border border-green-500/50' : emotion === 'sad' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/50' : emotion === 'angry' ? 'bg-red-500/20 text-red-400 border border-red-500/50' : 'bg-gray-500/20 text-gray-400 border border-gray-500/50'}`}>
-                  
-                      {emotion.charAt(0).toUpperCase() + emotion.slice(1)}
-                    </span>
-                  </div>
                 </div>
-            }
-            </div>
-          </div>
-
-          <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl shadow-2xl p-8 border border-gray-700 hover:border-pink-500/50 transition-all duration-300">
-            <h2 className="text-2xl font-bold text-white mb-6 bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
-              AI Avatar
-            </h2>
-            <Avatar
-            emotion={emotion}
-            isActive={transcript !== ''}
-            language={selectedLanguage} />
-          
-            {transcript &&
-          <div className="mt-6 text-center bg-gradient-to-r from-purple-900/30 to-pink-900/30 rounded-lg p-4 border border-purple-500/30">
-                <p className="text-sm text-gray-300">
-                  The avatar is signing with{' '}
-                  <span className="text-purple-400 font-semibold">
-                    {emotion}
-                  </span>{' '}
-                  expression in{' '}
-                  <span className="text-pink-400 font-semibold">
-                    {selectedLanguage}
-                  </span>
-                </p>
               </div>
-          }
-          </div>
-        </div> :
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl shadow-2xl p-8 border border-gray-700 hover:border-blue-500/50 transition-all duration-300">
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                Select Sign Language
+              <p className="mic-disclosure">
+                English speech input. Your browser may send audio to its
+                recognition service. Microphone access starts only when you
+                press the button.
+              </p>
+              {speech.interim && (
+                <p className="interim" role="status">
+                  Hearing: {speech.interim}
+                </p>
+              )}
+              {speech.error && (
+                <p role="alert" className="inline-error">
+                  {speech.error}
+                </p>
+              )}
+              <div className="label-row">
+                <label htmlFor="message" className="field-label">
+                  Your message / transcript
+                </label>
+                <button
+                  className="text-button"
+                  disabled={speech.listening || !text}
+                  onClick={() => {
+                    setText("");
+                    clearPlan();
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+              <textarea
+                id="message"
+                disabled={speech.listening}
+                maxLength={500}
+                value={text}
+                onChange={(e) => {
+                  setText(e.target.value);
+                  clearPlan();
+                }}
+                placeholder="Type what you would like to sign…"
+                aria-describedby="message-help"
+              />
+              <div className="input-meta" id="message-help">
+                <span>You can edit the transcript before playback.</span>
+                <span>{text.length}/500</span>
+              </div>
+              <label className="field-label output-label" htmlFor="sign-mode">
+                Signing mode
               </label>
               <select
-              value={selectedLanguage}
-              onChange={(e) => setSelectedLanguage(e.target.value)}
-              className="w-full px-4 py-3 bg-gray-900 border border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white transition-all duration-300">
-              
-                <option value="ASL">American Sign Language (ASL)</option>
-                <option value="ISL">Indian Sign Language (ISL)</option>
-                <option value="BSL">British Sign Language (BSL)</option>
-                <option value="AUSLAN">
-                  Australian Sign Language (AUSLAN)
+                id="sign-mode"
+                value={mode}
+                disabled={speech.listening}
+                onChange={(e) => {
+                  setMode(e.target.value as Plan["mode"]);
+                  clearPlan();
+                }}
+              >
+                <option value="phrases">Reviewed phrases</option>
+                <option value="vocabulary">
+                  Vocabulary practice — not sentence translation
                 </option>
-                <option value="ESL">Emirati Sign Language (ESL)</option>
               </select>
-            </div>
-
-            <div className="relative aspect-video bg-gray-950 rounded-lg overflow-hidden mb-6 border border-gray-700 shadow-xl">
-              <Webcam
-              ref={webcamRef}
-              audio={false}
-              screenshotFormat="image/jpeg"
-              className="w-full h-full object-cover"
-              videoConstraints={{
-                facingMode: 'user',
-                width: 1280,
-                height: 720
-              }} />
-            
-              {isCapturing &&
-            <div className="absolute top-4 right-4 flex items-center space-x-2 bg-red-500 text-white px-3 py-2 rounded-full shadow-lg shadow-red-500/50 animate-pulse">
-                  <div className="w-2 h-2 bg-white rounded-full" />
-                  <span className="text-sm font-medium">Recording</span>
-                </div>
-            }
-            </div>
-
-            <div className="flex justify-center">
-              <button
-              onClick={isCapturing ? stopCapture : startCapture}
-              disabled={isProcessing && !isCapturing}
-              className={`px-8 py-4 rounded-lg font-semibold text-white transition-all duration-300 ${isCapturing ? 'bg-gradient-to-r from-red-500 to-red-700 hover:from-red-600 hover:to-red-800 shadow-lg shadow-red-500/50' : 'bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 shadow-lg shadow-blue-500/50 hover:shadow-xl hover:shadow-blue-500/70 hover:scale-105'} ${isProcessing && !isCapturing ? 'opacity-50 cursor-not-allowed' : ''}`}>
-              
-                {isCapturing ?
-              <div className="flex items-center space-x-2">
-                    <StopCircleIcon className="w-5 h-5" />
-                    <span>Stop Capture</span>
-                  </div> :
-
-              <div className="flex items-center space-x-2">
-                    <VideoIcon className="w-5 h-5" />
-                    <span>Start Capture</span>
-                  </div>
-              }
-              </button>
-            </div>
-          </div>
-
-          <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl shadow-2xl p-8 border border-gray-700 hover:border-cyan-500/50 transition-all duration-300">
-            <h2 className="text-2xl font-bold text-white mb-6 bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">
-              Recognition Results
-            </h2>
-
-            {isProcessing && isCapturing &&
-          <div className="flex flex-col items-center justify-center py-12">
-                <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-t-2 border-blue-500 mb-4 shadow-lg shadow-blue-500/50" />
-                <p className="text-gray-300">
-                  Analyzing sign language gestures...
-                </p>
-              </div>
-          }
-
-            {detectedText && !isProcessing &&
-          <div className="space-y-6">
-                <div className="bg-blue-900/30 rounded-lg p-6 border border-blue-500/30 backdrop-blur-sm">
-                  <p className="text-sm font-medium text-gray-400 mb-2">
-                    Detected Text:
-                  </p>
-                  <p className="text-xl text-white font-semibold">
-                    {detectedText}
-                  </p>
-                </div>
-
-                <div className="bg-gray-900/50 rounded-lg p-6 border border-gray-700">
-                  <div className="flex items-center justify-between mb-4">
-                    <span className="text-sm font-medium text-gray-400">
-                      Detected Emotion:
-                    </span>
-                    <span
-                  className={`px-3 py-1 rounded-full text-sm font-medium ${emotion === 'happy' ? 'bg-green-500/20 text-green-400 border border-green-500/50' : emotion === 'sad' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/50' : emotion === 'angry' ? 'bg-red-500/20 text-red-400 border border-red-500/50' : 'bg-gray-500/20 text-gray-400 border border-gray-500/50'}`}>
-                  
-                      {emotion.charAt(0).toUpperCase() + emotion.slice(1)}
-                    </span>
-                  </div>
-
+              {catalogError && (
+                <div className="inline-error" role="alert">
+                  {catalogError}
                   <button
-                onClick={() => speakText(detectedText, emotion)}
-                className="w-full bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white px-4 py-3 rounded-lg font-medium transition-all duration-300 flex items-center justify-center space-x-2 shadow-lg shadow-blue-500/50 hover:shadow-xl hover:shadow-blue-500/70 hover:scale-105">
-                
-                    <PlayIcon className="w-5 h-5" />
-                    <span>Play Speech</span>
+                    className="text-button"
+                    onClick={() => setAttempt((v) => v + 1)}
+                  >
+                    Retry catalog
                   </button>
                 </div>
-
-                <div className="bg-cyan-900/20 rounded-lg p-4 border border-cyan-500/30">
-                  <p className="text-sm text-cyan-300">
-                    <strong>Note:</strong> The speech is generated with
-                    emotional tone matching the detected expression
-                  </p>
+              )}
+              {error && (
+                <div className="inline-error" role="alert">
+                  <Info size={18} />
+                  <div>
+                    {error}
+                    {unsupported.length > 0 && (
+                      <p>Unsupported: {unsupported.join(", ")}</p>
+                    )}
+                  </div>
                 </div>
-              </div>
-          }
-
-            {!detectedText && !isProcessing &&
-          <div className="flex items-center justify-center py-12 text-gray-500">
-                <p>Start capturing to see results</p>
-              </div>
-          }
+              )}
+              <button
+                className="primary-button"
+                disabled={!catalog || speech.listening}
+                onClick={() => submit(text)}
+              >
+                Prepare signing <ArrowRight size={18} />
+              </button>
+              <p className="local-note">
+                {catalog
+                  ? `${catalog.signs.length} reviewed animations · ${catalog.phrases.length} supported phrases`
+                  : "Loading signing catalog…"}
+              </p>
+            </section>
+            <Playback key={revision} catalog={catalog} plan={plan} />
           </div>
-        </div>
-      }
-    </div>);
-
+          <section className="panel supported">
+            <h2>Signing coverage</h2>
+            {catalog?.phrases.length ? (
+              <>
+                <p>Select a reviewed phrase to prepare its sign sequence.</p>
+                <div className="example-list">
+                  {catalog.phrases.map((phrase) => (
+                    <button
+                      key={phrase.text}
+                      disabled={speech.listening}
+                      onClick={() => {
+                        setMode("phrases");
+                        setText(phrase.text);
+                        clearPlan();
+                        const result = resolveInput(
+                          phrase.text,
+                          catalog,
+                          "phrases",
+                        );
+                        if (result.ok) setPlan(result.plan);
+                      }}
+                    >
+                      {phrase.text}
+                      <ArrowRight size={14} />
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p>
+                No validated signing animations are included in this checkout. A
+                language-specific motion pack, mapped to this rig or a
+                compatible human GLB rig, is required. No fallback gestures or
+                text playback are substituted.
+              </p>
+            )}
+            {catalog && catalog.signs.length > 0 && (
+              <details>
+                <summary>
+                  Supported vocabulary (
+                  {catalog.signs.filter((s) => s.kind === "sign").length})
+                </summary>
+                <p>
+                  {catalog.signs
+                    .filter((s) => s.kind === "sign")
+                    .map((s) => s.label)
+                    .join(" · ")}
+                </p>
+                <p>
+                  Fingerspelling assets, if present, are labeled separately and
+                  used only in reviewed phrase plans. There is no automatic
+                  fallback.
+                </p>
+              </details>
+            )}
+          </section>
+        </>
+      ) : (
+        <SignToSpeech />
+      )}
+    </main>
+  );
 }

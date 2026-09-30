@@ -42,7 +42,9 @@ export function Playback({
             Signing avatar
           </h2>
         </div>
-        <span className="pill">{plan ? plan.language : "Neutral preview"}</span>
+        <span className="pill">
+          {plan ? plan.language : catalog?.language || "Neutral preview"}
+        </span>
       </div>
       <div className="stage" aria-busy={state === "loading"}>
         <span className="stage-tag">
@@ -76,7 +78,7 @@ export function Playback({
             : state === "loading"
               ? "Loading avatar and animations…"
               : !plan
-                ? "Neutral pose · no signing animations connected"
+                ? "Choose a phrase to prepare signing"
                 : state === "playing"
                   ? "Playing sign sequence"
                   : state === "ended"
@@ -167,17 +169,28 @@ export function Playback({
       <div className="viewer-note">
         {sign ? (
           <p>
-            Source: {sign.source} · {sign.license} · Reviewed by{" "}
-            {sign.reviewedBy} ({sign.reviewedOn}).{" "}
-            {plan?.mode === "vocabulary"
-              ? "Vocabulary practice only — not sentence translation."
-              : "Reviewed phrase sequence."}
+            {sign.validation === "reference-demo" ? (
+              <>
+                ASL reference-based demo — not independently validated.{" "}
+                <a href={sign.source} target="_blank" rel="noreferrer">
+                  View sign reference
+                </a>
+              </>
+            ) : (
+              <>
+                Source: {sign.source} · {sign.license} · Reviewed by{" "}
+                {sign.reviewedBy} ({sign.reviewedOn}).{" "}
+                {plan?.mode === "vocabulary"
+                  ? "Vocabulary practice only — not sentence translation."
+                  : "Reviewed phrase sequence."}
+              </>
+            )}
           </p>
         ) : (
           <p>
-            The character is a neutral presentation rig. It will only move when
-            compatible, reviewed signing animations are installed. Captions
-            never replace signing.
+            Choose a demo phrase, prepare it, then press Play. The five ASL
+            motions are reference-based approximations, not independently
+            validated signing instruction.
           </p>
         )}
       </div>

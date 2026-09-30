@@ -1,5 +1,6 @@
 ﻿export interface Review {
   source: string;
+  validation?: "reference-demo" | "validated";
   license: string;
   reviewedBy: string;
   reviewedOn: string;
@@ -37,11 +38,14 @@ export type Resolution =
   | { ok: false; error: string; unsupported: string[] };
 export const normalize = (s: string) =>
   s.trim().replace(/\s+/g, " ").toLowerCase();
-function reviewed(value: Review) {
-  return ["source", "license", "reviewedBy", "reviewedOn"].every(
+function hasProvenance(value: Review) {
+  if (value.validation === "reference-demo")
+    return Boolean(value.source?.trim() && value.license?.trim());
+  if (value.validation !== undefined && value.validation !== "validated")
+    return false;
+  return (["source", "license", "reviewedBy", "reviewedOn"] as const).every(
     (key) =>
-      typeof value[key as keyof Review] === "string" &&
-      value[key as keyof Review].trim(),
+      typeof value[key] === "string" && value[key].trim(),
   );
 }
 export function validateCatalog(value: unknown): Catalog {
@@ -69,7 +73,7 @@ export function validateCatalog(value: unknown): Catalog {
       !["sign", "fingerspelling"].includes(s.kind) ||
       s.rigId !== c.rig.id ||
       !s.url ||
-      !reviewed(s) ||
+      !hasProvenance(s) ||
       !Array.isArray(s.cues) ||
       s.cues.some(
         (cue, i) =>
@@ -89,7 +93,7 @@ export function validateCatalog(value: unknown): Catalog {
     if (
       !p.text?.trim() ||
       phrases.has(normalize(p.text)) ||
-      !reviewed(p) ||
+      !hasProvenance(p) ||
       !Array.isArray(p.signIds) ||
       !p.signIds.length ||
       p.signIds.some((id) => !ids.has(id)) ||

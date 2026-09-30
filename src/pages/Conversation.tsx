@@ -8,12 +8,8 @@ import {
   Info,
 } from "lucide-react";
 import { Playback } from "../components/Playback";
-import {
-  loadCatalog,
-  resolveInput,
-  type Catalog,
-  type Plan,
-} from "../signing/pipeline";
+import { loadCatalog, type Catalog, type Plan } from "../signing/pipeline";
+import { demoPhrases, resolveDemoInput } from "../signing/demo";
 import { useSpeechInput } from "../hooks/useSpeechInput";
 import { SignToSpeech } from "./SignToSpeech";
 export function Conversation() {
@@ -24,8 +20,7 @@ export function Conversation() {
     [catalogError, setCatalogError] = useState(""),
     [unsupported, setUnsupported] = useState<string[]>([]);
   const [revision, setRevision] = useState(0),
-    [attempt, setAttempt] = useState(0),
-    [mode, setMode] = useState<Plan["mode"]>("phrases");
+    [attempt, setAttempt] = useState(0);
   const [tab, setTab] = useState<"sign" | "camera">("sign");
   useEffect(() => {
     const controller = new AbortController();
@@ -64,7 +59,7 @@ export function Conversation() {
       );
       return;
     }
-    const result = resolveInput(input, catalog, mode);
+    const result = resolveDemoInput(input, catalog);
     if (result.ok) setPlan(result.plan);
     else {
       setError(result.error);
@@ -99,8 +94,8 @@ export function Conversation() {
             }}
           >
             <ArrowLeft size={16} />
-            Sign to Speech <Video size={18} />
-            <span className="tiny-tag">Preview</span>
+            Video to Speech <Video size={18} />
+            <span className="tiny-tag">Simulated demo</span>
           </button>
         </div>
       </div>
@@ -191,30 +186,32 @@ export function Conversation() {
                   setText(e.target.value);
                   clearPlan();
                 }}
-                placeholder="Type what you would like to sign…"
+                placeholder="Try: Hi, Thank you, I love you, Yes, or No"
                 aria-describedby="message-help"
               />
               <div className="input-meta" id="message-help">
                 <span>You can edit the transcript before playback.</span>
                 <span>{text.length}/500</span>
               </div>
-              <label className="field-label output-label" htmlFor="sign-mode">
-                Signing mode
-              </label>
-              <select
-                id="sign-mode"
-                value={mode}
-                disabled={speech.listening}
-                onChange={(e) => {
-                  setMode(e.target.value as Plan["mode"]);
-                  clearPlan();
-                }}
+              <div
+                className="phrase-suggestions"
+                role="group"
+                aria-label="Demo phrases"
               >
-                <option value="phrases">Reviewed phrases</option>
-                <option value="vocabulary">
-                  Vocabulary practice — not sentence translation
-                </option>
-              </select>
+                {demoPhrases.map((phrase) => (
+                  <button
+                    type="button"
+                    key={phrase}
+                    disabled={speech.listening}
+                    onClick={() => {
+                      setText(phrase);
+                      clearPlan();
+                    }}
+                  >
+                    {phrase}
+                  </button>
+                ))}
+              </div>
               {catalogError && (
                 <div className="inline-error" role="alert">
                   {catalogError}
@@ -246,67 +243,21 @@ export function Conversation() {
               </button>
               <p className="local-note">
                 {catalog
-                  ? `${catalog.signs.length} reviewed animations · ${catalog.phrases.length} supported phrases`
+                  ? `5 demo phrase choices · ${catalog.signs.length} ASL demo animations installed`
                   : "Loading signing catalog…"}
               </p>
             </section>
             <Playback key={revision} catalog={catalog} plan={plan} />
           </div>
           <section className="panel supported">
-            <h2>Signing coverage</h2>
-            {catalog?.phrases.length ? (
-              <>
-                <p>Select a reviewed phrase to prepare its sign sequence.</p>
-                <div className="example-list">
-                  {catalog.phrases.map((phrase) => (
-                    <button
-                      key={phrase.text}
-                      disabled={speech.listening}
-                      onClick={() => {
-                        setMode("phrases");
-                        setText(phrase.text);
-                        clearPlan();
-                        const result = resolveInput(
-                          phrase.text,
-                          catalog,
-                          "phrases",
-                        );
-                        if (result.ok) setPlan(result.plan);
-                      }}
-                    >
-                      {phrase.text}
-                      <ArrowRight size={14} />
-                    </button>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <p>
-                No validated signing animations are included in this checkout. A
-                language-specific motion pack, mapped to this rig or a
-                compatible human GLB rig, is required. No fallback gestures or
-                text playback are substituted.
-              </p>
-            )}
-            {catalog && catalog.signs.length > 0 && (
-              <details>
-                <summary>
-                  Supported vocabulary (
-                  {catalog.signs.filter((s) => s.kind === "sign").length})
-                </summary>
-                <p>
-                  {catalog.signs
-                    .filter((s) => s.kind === "sign")
-                    .map((s) => s.label)
-                    .join(" · ")}
-                </p>
-                <p>
-                  Fingerspelling assets, if present, are labeled separately and
-                  used only in reviewed phrase plans. There is no automatic
-                  fallback.
-                </p>
-              </details>
-            )}
+            <h2>Five-phrase ASL demo</h2>
+            <p>
+              Choose Hi, Thank you, I love you, Yes, or No. Typed messages and
+              microphone transcripts use the same phrase matching. These
+              reference-based animations demonstrate five isolated ASL signs;
+              they are not sentence translation or independently validated
+              instruction.
+            </p>
           </section>
         </>
       ) : (

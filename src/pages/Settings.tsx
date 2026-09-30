@@ -18,8 +18,9 @@ export function Settings() {
           Sign Language Preferences
         </h2>
         <p>
-          No language pack is connected yet. Available languages will appear
-          here when their signing assets are installed.
+          The five-phrase demo uses American Sign Language (ASL). Its
+          reference-based animations have not been independently validated.
+          Other languages are not connected.
         </p>
         <div className="language-options" aria-label="Planned language options">
           {[
@@ -34,7 +35,11 @@ export function Settings() {
             <div className="language-option" key={name}>
               <strong>{name}</strong>
               <span>{region}</span>
-              <small>Not connected</small>
+              <small>
+                {name === "American Sign Language"
+                  ? "Active · five-phrase demo"
+                  : "Not connected"}
+              </small>
             </div>
           ))}
         </div>

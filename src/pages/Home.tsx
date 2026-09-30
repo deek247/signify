@@ -22,7 +22,7 @@ export function Home() {
       Icon: Globe,
       title: "Multiple Sign Languages",
       description:
-        "A catalog for reviewed signs and phrases. Target language and motion assets are awaiting confirmation.",
+        "This demo uses American Sign Language (ASL) for five phrases. Other languages are not connected.",
       color: "orange",
       link: "/settings",
     },
@@ -61,7 +61,7 @@ export function Home() {
           communities through speech, text, and visual expression.
         </p>
         <span className="home-status">
-          Prototype · signing motion assets not yet installed
+          ASL demo · five reference-based phrase animations
         </span>
       </div>
       <div className="feature-grid">
